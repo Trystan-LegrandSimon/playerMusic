@@ -1,9 +1,12 @@
 #!/usr/local/bin/python3.12
 
+import os
+import time
+import pygame
+from tkinter import *
 from tkinter import ttk, filedialog
 from pygame import mixer
-from tkinter import *
-import os
+from threading import Thread
 
 class App:
     def __init__(self):
@@ -12,6 +15,8 @@ class App:
         self.window.resizable(0, 0)
         self.window.config(bg="black")
         self.previous_volume = 1.0
+        self.duration = 0
+        self.playing = False  # Indicateur si la musique est en cours de lecture
 
         # Initialise la largeur de la fenêtre
         self.width_window = 0
@@ -62,10 +67,18 @@ class App:
         # Listbox pour afficher les fichiers MP3
         self.file_listbox = Listbox(cadre_pistes_audios, selectmode=SINGLE, font=("", 16))
         self.file_listbox.pack(expand=True, fill="both")
-        
+
         # Playback progress bar
-        progress_bar = ttk.Progressbar(frame, orient='horizontal', mode='determinate', length=1000)
-        progress_bar.pack()
+        self.progress_bar = ttk.Progressbar(frame, orient='horizontal', mode='determinate', length=800)
+        self.progress_bar.pack(pady=10, padx=(0, 10))
+        
+        # Libellé pour le temps restant
+        self.remaining_time_label = Label(frame, text="0:00", fg="white", bg="black", font=("", 16))
+        self.remaining_time_label.pack(side=LEFT, pady=10, padx=(0, 10))
+
+        # Libellé pour le temps maximum
+        self.max_time_label = Label(frame, text="0:00", fg="white", bg="black", font=("", 16))
+        self.max_time_label.pack(side=RIGHT, pady=10, padx=(10, 0))
 
         # Frame pour les boutons
         button_frame = Frame(frame, bg="black")
@@ -82,44 +95,68 @@ class App:
             button.pack(side=LEFT, pady=100, padx=30)
 
     def open_file_button_click(self):
-        folder_path = filedialog.askdirectory()
-        if folder_path:
-            mp3_files = [f for f in os.listdir(folder_path) if f.endswith(".mp3")]
+        file_paths = filedialog.askopenfilenames(filetypes=[("MP3 Files", "*.mp3")])
+
+        if file_paths:
             self.file_listbox.delete(0, END)  # Efface les éléments précédents dans la Listbox
-            for mp3_file in mp3_files:
+            for file_path in file_paths:
+                mp3_file = os.path.basename(file_path)
                 self.file_listbox.insert(END, mp3_file)
 
             # Sélectionne le premier fichier MP3 dans la Listbox (s'il y en a)
-            if mp3_files:
-                self.file_listbox.selection_set(0)
-                self.file_listbox.activate(0)
+            self.file_listbox.selection_set(0)
+            self.file_listbox.activate(0)
 
-                # Met à jour le chemin du dossier
-                self.folder_path = folder_path
+            # Met à jour le chemin du dossier (utilisez le répertoire du premier fichier sélectionné)
+            self.folder_path = os.path.dirname(file_paths[0])
 
             # Retourne l'index du premier fichier MP3 dans la Listbox
-            return 0 if mp3_files else None
+            return 0
         return None
+
+    def get_audio_duration(self, mp3_file):
+        sound = mixer.Sound(os.path.join(self.folder_path, mp3_file))
+        return sound.get_length()
+
+    def update_progress_bar(self):
+        while self.playing:
+            current_time = mixer.music.get_pos() / 1000  # Convertit le temps en secondes
+            self.progress_bar["value"] = current_time
+            self.remaining_time_label["text"] = self.format_time(int(current_time))
+            self.window.update()
+
+    def play_audio_with_progress(self, mp3_file):
+        self.duration = self.get_audio_duration(mp3_file)
+
+        minutes = int(self.duration // 60)
+        seconds = int(self.duration % 60)
+        max_time_str = f"{minutes}:{seconds:02}"
+        self.max_time_label["text"] = max_time_str
+
+        pygame.mixer.init()
+        pygame.mixer.music.load(os.path.join(self.folder_path, mp3_file))
+        pygame.mixer.music.play()
+
+        # Lance la lecture avec la barre de progression
+        self.playing = True
+        progress_thread = Thread(target=self.update_progress_bar, daemon=True)
+        progress_thread.start()
 
     # Ajoutez les méthodes pour les autres boutons avec la logique appropriée
     def previous_button_click(self):
         # Récupère l'index actuel de la piste en cours de lecture
         current_index = self.file_listbox.curselection()
-        
+
         # Vérifie si une piste est sélectionnée et qu'il y a plus d'une piste
         if current_index and len(current_index) > 0 and current_index[0] > 0:
             # Obtient l'index de la piste précédente
             previous_index = current_index[0] - 1
-            
+
             # Obtient le nom du fichier de la piste précédente
             previous_file = self.file_listbox.get(previous_index)
-            
-            # Construit le chemin complet du fichier
-            file_path = os.path.join(self.folder_path, previous_file)
-            
+
             # Charge et joue la piste précédente
-            mixer.music.load(file_path)
-            mixer.music.play()
+            self.play_audio_with_progress(previous_file)
 
             # Sélectionne la piste précédente dans la Listbox
             self.file_listbox.selection_clear(0, END)
@@ -127,28 +164,42 @@ class App:
             self.file_listbox.activate(previous_index)
 
     def play_button_click(self):
-        # Vérifie s'il y a une piste sélectionnée dans la Listbox
-        if self.file_listbox.curselection():
-            # Obtient l'index de la piste sélectionnée
-            selected_index = self.file_listbox.curselection()[0]
+        if not self.file_listbox.curselection():
+            return  # Aucune piste sélectionnée, ne faites rien
 
-            # Obtient le nom du fichier de la piste sélectionnée
-            selected_file = self.file_listbox.get(selected_index)
+        # Obtient l'index de la piste sélectionnée
+        selected_index = self.file_listbox.curselection()[0]
 
-            # Construit le chemin complet du fichier
-            file_path = os.path.join(self.folder_path, selected_file)
+        # Obtient le nom du fichier de la piste sélectionnée
+        selected_file = self.file_listbox.get(selected_index)
 
-            # Charge et joue la piste sélectionnée
-            mixer.music.load(file_path)
-            mixer.music.play()
+        if hasattr(self, "paused_time") and self.paused_time is not None:
+            # Reprend la musique à partir de la position mémorisée
+            pygame.mixer.music.unpause()
+            self.playing = True
+            progress_thread = Thread(target=self.update_progress_bar, daemon=True)
+            progress_thread.start()
+        else:
+            # Joue la piste sélectionnée avec la barre de progression
+            self.play_audio_with_progress(selected_file)
 
     def pause_button_click(self):
-        # Met en pause la piste en cours de lecture
-        mixer.music.pause()
+        if not self.playing:
+            return  # Aucune musique en cours de lecture, donc ne faites rien
+
+        # Mémorise la position actuelle avant de mettre en pause
+        current_time = mixer.music.get_pos() / 1000
+
+        # Met en pause la musique
+        pygame.mixer.music.pause()
+
+        # Stocke la position actuelle pour la reprise
+        self.paused_time = current_time
 
     def stop_button_click(self):
         # Arrête la lecture de la piste en cours
-        mixer.music.stop()
+        pygame.mixer.music.stop()
+        self.playing = False
 
     def next_button_click(self):
         # Récupère l'index actuel de la piste en cours de lecture
@@ -162,12 +213,8 @@ class App:
             # Obtient le nom du fichier de la piste suivante
             next_file = self.file_listbox.get(next_index)
 
-            # Construit le chemin complet du fichier
-            file_path = os.path.join(self.folder_path, next_file)
-
             # Charge et joue la piste suivante
-            mixer.music.load(file_path)
-            mixer.music.play()
+            self.play_audio_with_progress(next_file)
 
             # Sélectionne la piste suivante dans la Listbox
             self.file_listbox.selection_clear(0, END)
@@ -176,33 +223,36 @@ class App:
 
     def mute_button_click(self):
         # Vérifie si la musique est actuellement en mode muet
-        if mixer.music.get_volume() == 0.0:
+        if pygame.mixer.music.get_volume() == 0.0:
             # Si c'est le cas, rétablir le volume précédent
-            mixer.music.set_volume(self.previous_volume)
+            pygame.mixer.music.set_volume(self.previous_volume)
         else:
             # Sinon, sauvegarder le volume actuel et mettre en mode muet
-            self.previous_volume = mixer.music.get_volume()
-            mixer.music.set_volume(0.0)
+            self.previous_volume = pygame.mixer.music.get_volume()
+            pygame.mixer.music.set_volume(0.0)
 
     def volume_max_button_click(self):
         # Obtient le volume actuel
-        current_volume = mixer.music.get_volume()
+        current_volume = pygame.mixer.music.get_volume()
 
         # Augmente le volume de 10% (vous pouvez ajuster cela selon vos préférences)
         new_volume = min(current_volume + 0.1, 1.0)
 
         # Définit le nouveau volume
-        mixer.music.set_volume(new_volume)
+        pygame.mixer.music.set_volume(new_volume)
 
     def volume_min_button_click(self):
         # Obtient le volume actuel
-        current_volume = mixer.music.get_volume()
+        current_volume = pygame.mixer.music.get_volume()
 
         # Diminue le volume de 10% (vous pouvez ajuster cela selon vos préférences)
         new_volume = max(current_volume - 0.1, 0.0)
 
         # Définit le nouveau volume
-        mixer.music.set_volume(new_volume)
+        pygame.mixer.music.set_volume(new_volume)
 
+    def format_time(self, seconds):
+        minutes, seconds = divmod(seconds, 60)
+        return f"{int(minutes)}:{seconds:02}"
 
 app = App()
