@@ -1,3 +1,5 @@
+#!/usr/local/bin/python3.12
+
 from tkinter import ttk, filedialog
 from pygame import mixer
 from tkinter import *
