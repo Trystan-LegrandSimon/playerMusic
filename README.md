@@ -2,7 +2,7 @@
 
 Un lecteur de musique simple avec des fonctionnalités de lecture, pause, arrêt, et plus encore.
 
-![Music Player](./assets/images/music_player_image.png)
+![Music Player](./Images/music_player_image.png)
 
 ## Fonctionnalités
 
